@@ -161,5 +161,6 @@ document.getElementById('tAdm').onclick=async()=>{await load();go('adm')};
 document.getElementById('tOut').onclick=async()=>{await api('logout','POST');S.me=null;render()};
 (async()=>{await initDB();try{S.me=await api('me');S.lists=await api('lists');S.custom=await api('custom');await load();fresh()}catch(e){}render()})();
 
-</script>
+<script src="config.js?v=2"></script>
+<script src="app.js?v=2"></script>
 </body></html>
