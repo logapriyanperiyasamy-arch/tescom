@@ -1,1 +1,1 @@
-const API_URL = "YOUR-URL-HERE";
+const API_URL = "https://script.google.com/macros/s/";
