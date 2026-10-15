@@ -12,43 +12,23 @@ const el=(t,a={},...c)=>{const e=document.createElement(t);for(const k in a){if(
 const S={me:null,custom:[],lists:{},reports:[],users:[],view:'new',editId:null,v:{},q:'',fs:'',fp:'',armed:false};
 const app=document.getElementById('app');
 function toast(m){const t=el('div',{class:'toast'},m);document.body.append(t);setTimeout(()=>t.remove(),2200)}
-/* ===== Local storage "backend" (data stays in this browser) ===== */
-const DBK='dailyReportDB',DEF={project:['V53','V64'],site:['TEHR'],shift:['DAY SHIFT','NIGHT SHIFT'],line:[],station:[],fixtureSN:[],name:[],issue:[],rootCause:[],corrective:[]};
-const KEYS=['project','date','site','shift','line','department','station','fixtureSN','issue','rootCause','corrective','name','priority','status','spareUsed','spareName'];
-let D=JSON.parse(localStorage.getItem(DBK)||'null')||{users:{},reports:[],lists:{},custom:[],fresh:false};
-const persist=()=>localStorage.setItem(DBK,JSON.stringify(D));
-const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
-async function sha(p,s){const d=new TextEncoder().encode(s+':'+p);if(window.crypto&&crypto.subtle)return hex(await crypto.subtle.digest('SHA-256',d));let h=5381;for(const b of d)h=((h<<5)+h+b)>>>0;return String(h)}
-async function mkUser(u,name,pw,role){const salt=Math.random().toString(36).slice(2,12);D.users[u]={name,role,salt,hash:await sha(pw,salt)}}
-async function initDB(){if(!Object.keys(D.users).length){await mkUser('admin','Admin','admin123','admin');D.fresh=true;persist()}}
-const clean=b=>{const o={};KEYS.concat(D.custom.map(c=>c.key)).forEach(k=>o[k]=String(b[k]??'').slice(0,2000));o.spareQty=Math.max(0,Number(b.spareQty)||0);return o};
+/* ===== Shared online storage (Google Sheet via Apps Script) ===== */
+async function initDB(){}
 async function api(p,m='GET',b={}){
-  const me=()=>{const u=localStorage.getItem('drUser');if(!u||!D.users[u])throw new Error('Login required');return u};
-  const adm=()=>{const u=me();if(D.users[u].role!=='admin')throw new Error('Admins only');return u};
-  const [seg,id]=p.split('/');b=b||{};
-  if(seg==='login'){const u=String(b.username||'').trim().toLowerCase(),a=D.users[u];if(!a||await sha(b.password||'',a.salt)!==a.hash)throw new Error('Wrong username or password');localStorage.setItem('drUser',u);return{u,name:a.name,role:a.role}}
-  if(seg==='logout'){localStorage.removeItem('drUser');return{}}
-  if(seg==='me'){const u=me(),a=D.users[u];return{u,name:a.name,role:a.role}}
-  if(seg==='lists'){me();if(m==='PUT'){adm();D.lists={};Object.keys(DEF).forEach(k=>D.lists[k]=(b[k]||[]).map(s=>String(s).trim()).filter(Boolean));persist();return{}}return{...DEF,...Object.fromEntries(Object.entries(D.lists).filter(([k,v])=>v.length))}}
-  if(seg==='custom'){me();if(m==='PUT'){adm();const old=D.custom;D.custom=(Array.isArray(b)?b:[]).slice(0,30).map(c=>{const label=String(c.label||'').trim().slice(0,60);if(!label)return null;const key=(c.key&&old.some(o=>o.key===c.key))?c.key:'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);return{key,label,options:(c.options||[]).map(s=>String(s).trim()).filter(Boolean)}}).filter(Boolean);persist()}return JSON.parse(JSON.stringify(D.custom))}
-  if(seg==='reports'){
-    if(m==='POST'){const u=me(),r={...clean(b),id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),createdAt:Date.now(),createdBy:u};D.reports.push(r);persist();return r}
-    adm();
-    if(m==='GET')return JSON.parse(JSON.stringify([...D.reports].reverse()));
-    if(m==='PUT'){const i=D.reports.findIndex(r=>r.id===id);if(i<0)throw new Error('Not found');D.reports[i]={...D.reports[i],...clean(b)};persist();return{}}
-    if(m==='DELETE'){D.reports=id?D.reports.filter(r=>r.id!==id):[];persist();return{}}}
-  if(seg==='users'){const cu=adm();
-    if(m==='GET')return Object.entries(D.users).map(([u,a])=>({u,name:a.name,role:a.role}));
-    if(m==='POST'){const u=String(b.username||'').trim().toLowerCase(),pw=String(b.password||'');if(!/^[a-z0-9._-]{2,30}$/.test(u))throw new Error('Username: 2-30 letters/numbers');if(pw.length<6)throw new Error('Password min 6 characters');await mkUser(u,String(b.name||u).trim(),pw,b.role==='admin'?'admin':'member');D.fresh=false;persist();return{}}
-    if(m==='DELETE'){if(id===cu)throw new Error("Can't delete yourself");delete D.users[id];persist();return{}}}
-  throw new Error('Unknown request')}
+  if(typeof API_URL==='undefined'||!API_URL||API_URL.indexOf('PASTE')===0)throw new Error('Not connected: set the web app URL in config.js');
+  document.body.style.cursor='progress';
+  try{
+    const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:localStorage.getItem('drToken')||'',path:p,method:m,body:b||{}})});
+    const j=await r.json();if(j.error)throw new Error(j.error);
+    if(p==='login')localStorage.setItem('drToken',j.data.token);
+    if(p==='logout')localStorage.removeItem('drToken');
+    return j.data
+  }finally{document.body.style.cursor=''}}
 function reportRows(){return S.reports.map(r=>({Project:r.project,Date:r.date,Site:r.site,Shift:r.shift,Line:r.line,Department:r.department,Station:r.station,'Fixture SN':r.fixtureSN,'Issue Description':r.issue,'Root Cause Analysis':r.rootCause,'Corrective Actions':r.corrective,Name:r.name,Priority:r.priority,Status:r.status,'Spare Used':r.spareUsed,'Spare Name':r.spareName,'Spare Qty':r.spareQty,'Submitted By':r.createdBy,...Object.fromEntries(S.custom.map(c=>[c.label,r[c.key]||'']))}))}
 function saveFile(name,data,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;document.body.append(a);a.click();a.remove()}
 function exportXlsx(){const rows=reportRows();if(!rows.length)return toast('Nothing to export');
   if(window.XLSX){const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Reports');XLSX.writeFile(wb,'daily-report-'+today()+'.xlsx')}
   else{const h=Object.keys(rows[0]),q=v=>'"'+String(v).replace(/"/g,'""')+'"';saveFile('daily-report-'+today()+'.csv','\ufeff'+[h.map(q).join(',')].concat(rows.map(r=>h.map(k=>q(r[k])).join(','))).join('\r\n'),'text/csv')}}
-function backup(){saveFile('daily-report-backup-'+today()+'.json',JSON.stringify(D),'application/json')}
-function restore(e){const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const X=JSON.parse(rd.result);Object.assign(D.users,X.users||{});const have=new Set(D.reports.map(r=>r.id));(X.reports||[]).forEach(r=>{if(!have.has(r.id))D.reports.push(r)});if(X.custom&&X.custom.length)D.custom=X.custom;if(X.lists)D.lists=X.lists;persist();toast('Restored');load().then(()=>render())}catch(x){toast('Invalid backup file')}};rd.readAsText(f)}
 function fresh(){S.v={date:today(),spareUsed:'N',spareQty:0,status:'OPEN',name:S.me?S.me.name:''}}
 const opts=f=>S.lists[f.k]||f.o||[];
 function form(){
@@ -79,7 +59,7 @@ function admin(){
   w.append(el('div',{class:'stats'},...[['Total',R.length],['Open',cnt('OPEN')],['Pending',cnt('PENDING')],['Closed',cnt('CLOSE')],['High priority open',R.filter(r=>r.priority==='high'&&r.status!=='CLOSE').length]].map(([l,n])=>el('div',{class:'stat'},el('b',{},n),el('span',{},l)))));
   const sel=(o,val,ph,fn)=>{const s=el('select',{onchange:e=>fn(e.target.value)},el('option',{value:''},ph),...o.map(x=>el('option',{value:x},x)));s.value=val;return s};
   w.append(el('div',{class:'row'},el('input',{placeholder:'Search…',value:S.q,oninput:e=>{S.q=e.target.value;renderTable()}}),sel(['OPEN','PENDING','CLOSE'],S.fs,'All status',v=>{S.fs=v;renderTable()}),sel(opts({k:'project'}),S.fp,'All projects',v=>{S.fp=v;renderTable()})),
-    el('div',{class:'row'},el('button',{class:'p',onclick:()=>{S.editId=null;fresh();go('new')}},'+ Add report'),el('button',{onclick:exportXlsx},'Export Excel'),el('button',{onclick:backup},'Backup'),el('label',{class:'btn'},'Restore',el('input',{type:'file',accept:'.json',style:'display:none',onchange:restore})),
+    el('div',{class:'row'},el('button',{class:'p',onclick:()=>{S.editId=null;fresh();go('new')}},'+ Add report'),el('button',{onclick:exportXlsx},'Export Excel'),
     el('button',{class:'d',onclick:async()=>{if(!S.armed){S.armed=true;render();setTimeout(()=>{S.armed=false;if(S.view==='adm')render()},4000);return}S.armed=false;await api('reports','DELETE');await load();toast('All deleted');render()}},S.armed?'Tap again to DELETE ALL':'Delete all')),
     el('div',{class:'tw card',id:'tbl'}));
   const lc=el('details',{class:'card',open:''},el('summary',{},'Dropdown lists (admin only)'),el('p',{class:'msg'},'One item per line.'));const tas={};
